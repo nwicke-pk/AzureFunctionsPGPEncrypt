@@ -19,6 +19,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Azure.Identity;
 using Azure.Storage.Blobs;
+using Microsoft.Extensions.Configuration;
 
 namespace AzureFunctionsPGPEncrypt
 {
@@ -35,9 +36,18 @@ namespace AzureFunctionsPGPEncrypt
         {
             log.LogInformation($"C# HTTP trigger function {nameof(PGPEncrypt)} processed a request.");
 
+            var config = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables()
+            .Build();
+
+            var connectionString = config["storageConnectionString"];
+
             string publicKeyBase64 = req.Query["public-key"];
             string publicKeyEnvironmentVariable = req.Query["public-key-environment-variable"];
             string publicKeySecretId = req.Query["public-key-secret-id"];
+            string containerName = req.Query["container"];
             string sourceFileName = req.Query["sourceFile"];
             string desintationFileName = req.Query["destinationFile"];
 
@@ -71,27 +81,23 @@ namespace AzureFunctionsPGPEncrypt
             string publicKey = Encoding.UTF8.GetString(data);
             req.EnableRewind(); //Make RequestBody Stream seekable
 
-            Task<Stream> blobTask = GetBlockBlobAsync("pktestdatastorage", "testdata", sourceFileName);
-            //Stream encryptStream = new MemoryStream();
-            //blobTask.Result.CopyTo( encryptStream);
-            blobTask.Result.Position = 0;
-            //blobTask.Result.
 
+            BlobHandler blobHandler = new BlobHandler(log, containerName, connectionString, sourceFileName, desintationFileName);
+            Task<Stream> getBlobTask = blobHandler.ReadInputFile();
+            getBlobTask.Result.Position = 0;
 
-            //StreamReader reader = new StreamReader(blobTask.Result);
-            //string text = reader.ReadToEnd();
+            //Task<Stream> blobTask = GetBlockBlobAsync("pktestdatastorage", "testdata", sourceFileName);
+            //blobTask.Result.Position = 0;
+            
+            Stream encryptedData = await EncryptAsync(getBlobTask.Result, publicKey);
 
+            Task writeBlobTask = blobHandler.WriteOutputBlob(encryptedData);
 
-           // StreamReader reader2 = new StreamReader(blobTask.Result);
-            //string text2 = reader2.ReadToEnd();
+            //await CreateBlockBlobAsync("pktestdatastorage", "testdata", desintationFileName, encryptedData);
 
-            Stream encryptedData = await EncryptAsync(blobTask.Result, publicKey);
+            //encryptedData.Seek(0, SeekOrigin.Begin);
 
-            await CreateBlockBlobAsync("pktestdatastorage", "testdata", desintationFileName, encryptedData);
-
-            encryptedData.Seek(0, SeekOrigin.Begin);
-
-            return new OkObjectResult(encryptedData);
+            return new OkObjectResult(desintationFileName);
         }
 
         private static async Task<string> GetPublicKeyAsync(string secretIdentifier)
