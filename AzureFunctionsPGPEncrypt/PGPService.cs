@@ -14,11 +14,6 @@ using System.Text;
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.Extensions.Logging;
-using Microsoft.Azure.WebJobs.Extensions.Storage;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
-using Azure.Identity;
-using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 
 namespace AzureFunctionsPGPEncrypt
@@ -34,8 +29,6 @@ namespace AzureFunctionsPGPEncrypt
         HttpRequest req,
             ILogger log)
         {
-            log.LogInformation($"My C# HTTP trigger function {nameof(PGPService)} processed a request.");
-
             var config = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
@@ -50,7 +43,6 @@ namespace AzureFunctionsPGPEncrypt
                 return (new BadRequestObjectResult("Storage Connection String Missing from configuration."));
             }
 
-
             string keySecretID = req.Query["key"];
             string containerName = req.Query["container"];
             string sourceFileName = req.Query["sourceFile"];
@@ -58,7 +50,9 @@ namespace AzureFunctionsPGPEncrypt
             string passPhrase = req.Query["passphrase"];
             string action = req.Query["action"];
             string keyBase64;
-            
+
+            log.LogInformation($"Started with action = {action ?? "null - default to encrypt"}.");
+
             if (keySecretID == null)
             {
                 return new BadRequestObjectResult("Please pass a base64 encoded key vault secret identifier on the query string. public key for encryption and private key fro decription.");
@@ -81,6 +75,7 @@ namespace AzureFunctionsPGPEncrypt
             string key = Encoding.UTF8.GetString(data);
             req.EnableRewind(); //Make RequestBody Stream seekable
 
+            log.LogInformation($"retrieved key");
 
             BlobHandler blobHandler = new BlobHandler(log, containerName, connectionString, sourceFileName, destinationFileName);
             Task<Stream> getBlobTask = blobHandler.ReadInputFile();
@@ -88,21 +83,21 @@ namespace AzureFunctionsPGPEncrypt
             log.LogInformation($"{getBlobTask.Result.Length} read from blob.");
 
             Stream outData = new MemoryStream();
-            //default to encrypt
+            
             action = action.ToLower();
             if (action == "decrypt")
             {
                 outData = await DecryptAsync(getBlobTask.Result, key, passPhrase);
-                log.LogInformation($"{outData.Length} of dencrypted data.");
+                log.LogInformation($"{outData.Length} of decrypted data.");
             }
-            else
+            else  //default to encrypt
             {
                 outData = await EncryptAsync(getBlobTask.Result, key);
                 log.LogInformation($"{outData.Length} of encrypted data.");
             }
 
             Task writeBlobTask = blobHandler.WriteOutputBlob(outData);
-
+            
             return new OkObjectResult(destinationFileName);
         }
 
