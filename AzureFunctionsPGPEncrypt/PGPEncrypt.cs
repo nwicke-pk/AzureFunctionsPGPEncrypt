@@ -38,6 +38,9 @@ namespace AzureFunctionsPGPEncrypt
             string publicKeyBase64 = req.Query["public-key"];
             string publicKeyEnvironmentVariable = req.Query["public-key-environment-variable"];
             string publicKeySecretId = req.Query["public-key-secret-id"];
+            string sourceFileName = req.Query["sourceFile"];
+            string desintationFileName = req.Query["destinationFile"];
+
 
             if (publicKeyBase64 == null && publicKeyEnvironmentVariable == null && publicKeySecretId == null)
             {
@@ -68,19 +71,25 @@ namespace AzureFunctionsPGPEncrypt
             string publicKey = Encoding.UTF8.GetString(data);
             req.EnableRewind(); //Make RequestBody Stream seekable
 
-            /*  CloudStorageAccount account = new CloudStorageAccount(;
-              CloudBlobClient blobClient = account.CreateCloudBlobClient();
-              CloudBlobContainer container = blobClient.GetContainerReference("names-in");
+            Task<Stream> blobTask = GetBlockBlobAsync("pktestdatastorage", "testdata", sourceFileName);
+            //Stream encryptStream = new MemoryStream();
+            //blobTask.Result.CopyTo( encryptStream);
+            blobTask.Result.Position = 0;
+            //blobTask.Result.
 
-              var blobReference = container.GetBlockBlobReference(blobPath);
 
-              string originalName = blobReference.DownloadText();
+            //StreamReader reader = new StreamReader(blobTask.Result);
+            //string text = reader.ReadToEnd();
 
-              return originalName;*/
 
-            await CreateBlockBlobAsync("pktestdatastorage", "testdata", "new_file_now.csv");
+           // StreamReader reader2 = new StreamReader(blobTask.Result);
+            //string text2 = reader2.ReadToEnd();
 
-            Stream encryptedData = await EncryptAsync(req.Body, publicKey);
+            Stream encryptedData = await EncryptAsync(blobTask.Result, publicKey);
+
+            await CreateBlockBlobAsync("pktestdatastorage", "testdata", desintationFileName, encryptedData);
+
+            encryptedData.Seek(0, SeekOrigin.Begin);
 
             return new OkObjectResult(encryptedData);
         }
@@ -104,13 +113,21 @@ namespace AzureFunctionsPGPEncrypt
             using (PGP pgp = new PGP())
             {
                 Stream outputStream = new MemoryStream();
-
-                using (inputStream)
-                using (Stream publicKeyStream = GenerateStreamFromString(publicKey))
+                try
                 {
-                    await pgp.EncryptStreamAsync(inputStream, outputStream, publicKeyStream, true, true);
-                    outputStream.Seek(0, SeekOrigin.Begin);
-                    return outputStream;
+                    using (inputStream)
+                    using (Stream publicKeyStream = GenerateStreamFromString(publicKey))
+                    {
+                        await pgp.EncryptStreamAsync(inputStream, outputStream, publicKeyStream, true, true);
+                        outputStream.Seek(0, SeekOrigin.Begin);
+                        return outputStream;
+                    }
+                }
+                catch (Exception e )
+                {
+                    Console.WriteLine(e.Message);
+                    Console.ReadLine();
+                    throw;
                 }
             }
         }
@@ -126,7 +143,7 @@ namespace AzureFunctionsPGPEncrypt
         }
 
 
-        private async static Task CreateBlockBlobAsync(string accountName, string containerName, string blobName)
+        private async static Task CreateBlockBlobAsync(string accountName, string containerName, string blobName, Stream blobContents)
         {
 
             // Construct the blob container endpoint from the arguments.
@@ -134,9 +151,9 @@ namespace AzureFunctionsPGPEncrypt
                                                         accountName,
                                                         containerName);
 
-   
+
             // Get a credential and create a client object for the blob container.
-            BlobContainerClient containerClient = new BlobContainerClient("DefaultEndpointsProtocol=https;AccountName=pktestdatastorage;AccountKey=AakIuSa76YTTNjs6Xm2TNuH7VLsBg+Y5KYJHB034n0KDpHT4jFrmibKrNtYo5y1rwCG/5r+FC66rxeX6DpoLgg==;EndpointSuffix=core.windows.net","testdata");
+            BlobContainerClient containerClient = new BlobContainerClient("DefaultEndpointsProtocol=https;AccountName=pktestdatastorage;AccountKey=AakIuSa76YTTNjs6Xm2TNuH7VLsBg+Y5KYJHB034n0KDpHT4jFrmibKrNtYo5y1rwCG/5r+FC66rxeX6DpoLgg==;EndpointSuffix=core.windows.net", "testdata");
 
             try
             {
@@ -144,13 +161,53 @@ namespace AzureFunctionsPGPEncrypt
                 await containerClient.CreateIfNotExistsAsync();
 
                 // Upload text to a new block blob.
-                string blobContents = "This is a block blob.";
-                byte[] byteArray = Encoding.ASCII.GetBytes(blobContents);
+                //string blobContents = "This is a block blob.";
+                //  byte[] byteArray = Encoding.ASCII.GetBytes(blobContents);
 
-                using (MemoryStream stream = new MemoryStream(byteArray))
+                //using (MemoryStream stream = new MemoryStream(byteArray))
                 {
-                    await containerClient.UploadBlobAsync(blobName, stream);
+                    await containerClient.UploadBlobAsync(blobName, blobContents);
                 }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                Console.ReadLine();
+                throw;
+            }
+        }
+
+
+        private async static Task<Stream> GetBlockBlobAsync(string accountName, string containerName, string blobName)
+        {
+
+            // Construct the blob container endpoint from the arguments.
+            string containerEndpoint = string.Format("https://{0}.blob.core.windows.net/{1}",
+                                                        accountName,
+                                                        containerName);
+
+
+            // Get a credential and create a client object for the blob container.
+            BlobContainerClient containerClient = new BlobContainerClient("DefaultEndpointsProtocol=https;AccountName=pktestdatastorage;AccountKey=AakIuSa76YTTNjs6Xm2TNuH7VLsBg+Y5KYJHB034n0KDpHT4jFrmibKrNtYo5y1rwCG/5r+FC66rxeX6DpoLgg==;EndpointSuffix=core.windows.net", "testdata");
+
+            try
+            {
+                // Create the container if it does not exist.
+                await containerClient.CreateIfNotExistsAsync();
+                BlobClient blobclient = containerClient.GetBlobClient(blobName);
+                Azure.Response<Azure.Storage.Blobs.Models.BlobDownloadInfo> blobInfo = await blobclient.DownloadAsync();
+
+                MemoryStream memoryStream = new MemoryStream();
+                blobInfo.Value.Content.CopyTo(memoryStream);
+
+              
+               // StreamReader reader = new StreamReader(memoryStream);
+                //string text = reader.ReadToEnd();
+                //memoryStream.Seek(0, SeekOrigin.Begin);
+                
+
+                return memoryStream;
+
             }
             catch (Exception e)
             {
