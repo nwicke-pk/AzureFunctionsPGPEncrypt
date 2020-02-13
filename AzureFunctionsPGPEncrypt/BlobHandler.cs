@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AzureFunctionsPGPEncrypt
 {
-    class BlobHandler
+    public class BlobHandler
     {
         private ILogger _log;
         private CloudStorageAccount _storageAccount;
@@ -52,9 +52,7 @@ namespace AzureFunctionsPGPEncrypt
 
         }
 
-
-
-
+       
         public async Task WriteOutputBlob(Stream rawData)
         {
             //createing blob object in memory
@@ -64,9 +62,5 @@ namespace AzureFunctionsPGPEncrypt
             await blob.UploadFromStreamAsync(rawData);
             //await blob.UploadTextAsync(rawData);
         }
-
-
-
-
     }
 }
