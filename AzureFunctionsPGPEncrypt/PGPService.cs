@@ -15,6 +15,8 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
+using AzureFunctionsPGPService;
+using Newtonsoft.Json;
 
 namespace AzureFunctionsPGPEncrypt
 {
@@ -25,8 +27,8 @@ namespace AzureFunctionsPGPEncrypt
 
         [FunctionName(nameof(PGPService))]
         public static async Task<IActionResult> RunAsync(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)]
-        HttpRequest req,
+             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
+            // [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] PGPRequest req,
             ILogger log)
         {
             var config = new ConfigurationBuilder()
@@ -43,12 +45,19 @@ namespace AzureFunctionsPGPEncrypt
                 return (new BadRequestObjectResult("Storage Connection String Missing from configuration."));
             }
 
-            string keySecretID = req.Query["key"];
-            string containerName = req.Query["container"];
-            string sourceFileName = req.Query["sourceFile"];
-            string destinationFileName = req.Query["destinationFile"];
-            string passPhrase = req.Query["passphrase"];
-            string action = req.Query["action"];
+
+            // read the contents of the posted data into a string
+            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+
+            // use Json.NET to deserialize the posted JSON into a C# dynamic object
+            dynamic body = JsonConvert.DeserializeObject(requestBody);
+
+            string containerName = body.container;
+            string sourceFileName = body.sourceFile;
+            string destinationFileName = body.destinationFile;
+            string action = body.action;
+            string passPhrase = body.passPhrase;
+            string keySecretID = body.key;
             string keyBase64;
 
             log.LogInformation($"Started with action = {action ?? "null - default to encrypt"}.");
@@ -70,6 +79,7 @@ namespace AzureFunctionsPGPEncrypt
             {
                 return new UnauthorizedResult();
             }
+            
 
             byte[] data = Convert.FromBase64String(keyBase64);
             string key = Encoding.UTF8.GetString(data);
@@ -95,9 +105,15 @@ namespace AzureFunctionsPGPEncrypt
                 outData = await EncryptAsync(getBlobTask.Result, key);
                 log.LogInformation($"{outData.Length} of encrypted data.");
             }
-
-            Task writeBlobTask = blobHandler.WriteOutputBlob(outData);
-            
+            try
+            {
+                Task writeBlobTask = blobHandler.WriteOutputBlob(outData);
+            }
+            catch (Exception ex)
+            {
+                log.LogError($"Error writing file! - {ex}");
+                return new BadRequestObjectResult($"Error writing file {ex}");
+            }
             return new OkObjectResult(destinationFileName);
         }
 

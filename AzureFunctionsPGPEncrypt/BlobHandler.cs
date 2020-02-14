@@ -7,13 +7,13 @@ using Microsoft.Extensions.Logging;
 
 namespace AzureFunctionsPGPEncrypt
 {
-    public class BlobHandler
+     internal class BlobHandler
     {
-        private ILogger _log;
+        private readonly ILogger _log;
         private CloudStorageAccount _storageAccount;
         private CloudBlobContainer _storageContainer;
         private CloudBlobClient _blobClient;
-        string _inputFileName, _outputFileName;
+        readonly string _inputFileName, _outputFileName;
 
         public BlobHandler(ILogger log, string containerName, string storageAccountConnectionstring, string inputFileName, string outputFileName)
         {
@@ -55,12 +55,20 @@ namespace AzureFunctionsPGPEncrypt
        
         public async Task WriteOutputBlob(Stream rawData)
         {
-            //createing blob object in memory
-            CloudBlockBlob blob = _storageContainer.GetBlockBlobReference(_outputFileName);
+            try
+            {
+                //createing blob object in memory
+                CloudBlockBlob blob = _storageContainer.GetBlockBlobReference(_outputFileName);
 
-            // Writing to the blob 
-            await blob.UploadFromStreamAsync(rawData);
-            //await blob.UploadTextAsync(rawData);
+                // Writing to the blob 
+                await blob.UploadFromStreamAsync(rawData);
+                //await blob.UploadTextAsync(rawData);
+            }
+            catch ( StorageException ex)
+            {
+                _log.LogError($"Error writing blob - {ex}");
+                throw;
+            }
         }
     }
 }
